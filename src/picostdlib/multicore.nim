@@ -1,5 +1,8 @@
 #version: 0.1.2
 
+import private/linkutils
+linkLibrary("pico_multicore")
+
 {.push header: "pico/multicore.h".} 
 type
   ThreadFunc* = proc() {.cDecl.}

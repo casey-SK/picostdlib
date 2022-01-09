@@ -1,6 +1,6 @@
 import commandant
-import std/[strformat, strutils, os, osproc, httpclient, strscans, terminal]
-
+import std/[strformat, strutils, os, osproc, httpclient, strscans, terminal, strscans, streams]
+import picostdlib/private/linkutils
 
 proc printError(msg: string) =
   echo ansiForegroundColorCode(fgRed), msg, ansiResetCode
@@ -9,6 +9,49 @@ proc printError(msg: string) =
 
 proc helpMessage(): string =
   result = "some useful message here..."
+
+proc addLinkLibs(program: string) =
+  discard tryRemoveFile("csource/CMakeLists.txt.tmp")
+  const
+    inFile = "csource/CMakeLists.txt"
+    outFile = "csource/CMakeLists.txt.tmp"
+  let
+    inBuffer = newFileStream(inFile)
+    outBuffer = newFileStream(outFile, fmWrite)
+  
+  var
+    inLinkLib = false
+    isLinkLine = false
+    projName = ""
+
+  for line in inbuffer.lines:
+    if line.startsWith("target_link_libraries"):
+      discard line.scanf("target_link_libraries($+ ", projName)
+      inLinkLib = true
+      isLinkLine = true
+    else:
+      if inLinkLib: # we're inside the `target_link_library` scope
+        if line.contains(")"): # We're at either a new call or end of `target_link_library`
+          outBuffer.write("target_link_libraries(")
+          outBuffer.write(projName)
+          outBuffer.write "\n"
+          outBuffer.write(readFile("src" / LibFileName))
+          outBuffer.writeLine(")")
+          if not isLinkLine and line != ")":
+            # Only write line if not `)` and not on same line as target link
+            outbuffer.writeLine(line)
+          inLinkLib = false
+      else:
+        outBuffer.writeLine(line)
+    isLinkLine = false
+
+
+  inBuffer.close()
+  outBuffer.close()
+
+  moveFile(outFile, inFile)
+  discard tryRemoveFile("src" / LibFileName)
+
 
 proc builder(program: string, output = "") =
   # remove previous builds
@@ -23,6 +66,7 @@ proc builder(program: string, output = "") =
   # rename the .c file
   moveFile(("csource/" & fmt"@m{program}.c"), ("csource/" & fmt"""{program.replace(".nim")}.c"""))
   # update file timestamps
+  addLinkLibs(program)
   when not defined(windows):
     let touchError = execCmd("touch csource/CMakeLists.txt")
   when defined(windows):

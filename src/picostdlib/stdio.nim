@@ -1,4 +1,6 @@
 import system/ansi_c
+import private/linkutils
+linkLibrary("pico_stdlib")
 
 {.push header: "<stdio.h>".}
 proc stdioInitAll*{.importc: "stdio_init_all".}
