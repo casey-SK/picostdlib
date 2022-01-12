@@ -58,9 +58,10 @@ library [dependencies](https://github.com/raspberrypi/pico-sdk#quick-start-your-
     piconim init ...
     ```
     (`...`) indicates you can provide options to the subcommand, such as:
-        - (--sdk, -s) -> specify the path to a locally installed `pico-sdk` repository, 
+    
+    - (--sdk, -s) -> specify the path to a locally installed `pico-sdk` repository, 
         ex.  `--sdk:/home/casey/pico-sdk`
-        - (--nimbase, -n) -> similarly, you can provide the path to a locally installed 
+    - (--nimbase, -n) -> similarly, you can provide the path to a locally installed 
         `nimbase.h` file. Otherwise, the program attempts to download the file from
         the nim-lang github repository. ex. `-n:/path/to/nimbase.h`
 
