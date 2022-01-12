@@ -1,3 +1,6 @@
+import private/linkutils
+linkLibrary("pico_stdlib")
+
 type
   GpioFunction* {.size: sizeof(uint32).} = enum
     ## GPIO function definitions for use with function select. 

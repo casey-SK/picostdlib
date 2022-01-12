@@ -1,3 +1,7 @@
+import private/linkutils
+linkLibrary("hardware_i2c")
+
+
 type
   I2Hw* {.importC: "i2c_hw_t", header: "hardware/structs/i2c.h".} = object
     con*, tar*, sar*: uint32

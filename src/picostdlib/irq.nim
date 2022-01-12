@@ -6,6 +6,9 @@ const
   PwmIrqWrap* = 4.cuint
   # more required for full compatibility
 
+import private/linkutils
+linkLibrary("hardware_irq")
+
 {.push header: "hardware/irq.h".}
 
 type
