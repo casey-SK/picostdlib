@@ -26,21 +26,46 @@ have it, consider using [choosenim](https://github.com/dom96/choosenim)
 2. Since this is just a wrapper for the original 
 [pico-sdk](https://github.com/raspberrypi/pico-sdk), you will need to install the C 
 library [dependencies](https://github.com/raspberrypi/pico-sdk#quick-start-your-own-project) 
-(Step 1 in the quick start section)
+(Step 1 in the quick start section). On raspbian/debian/ubuntu, you may install by:
 
-3. From the terminal, run `nimble install https://github.com/beef331/picostdlib`.
+    ```bash
+    sudo apt install cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential libstdc++-arm-none-eabi-newlib
+    ```
 
-4. Run `piconim init <project-name>` to create a new project directory from a 
-template. This will create a new folder, so make sure you are in the parent folder.
-You can also provide the following options to the subcommand:
-    - (--sdk, -s) -> specify the path to a locally installed `pico-sdk` repository, 
-    ex.  `--sdk:/home/casey/pico-sdk`
-    - (--nimbase, -n) -> similarly, you can provide the path to a locally installed 
-    `nimbase.h` file. Otherwise, the program attempts to download the file from
-    the nim-lang github repository. ex. `-n:/path/to/nimbase.h`
-    - (--overwrite, -O) -> a flag to specify overwriting an exisiting directory 
-    with the `<project-name>` already created. Be careful with this. 
-    ex. `piconim myProject --overwrite` will replace a folder named `myProject`
+3. Install `picostdlib`:
+
+    ```bash
+    nimble install https://github.com/beef331/picostdlib
+    ```
+
+4. Create a nim pico project from a template:
+
+    ```bash
+    piconim create <project-name>
+    ```
+    
+    to create a new project directory from a template. This will create a new folder, so make 
+    sure you are in the parent folder. Use the `--overwrite` flag if you wish to overwrite 
+    and existing folder
+
+5. change into the project directory and run `piconim init`
+
+    ```bash
+    cd <project-name>
+    ```
+    
+    ```bash
+    piconim init ...
+    ```
+    (`...`) indicates you can provide options to the subcommand, such as:
+        - (--sdk, -s) -> specify the path to a locally installed `pico-sdk` repository, 
+        ex.  `--sdk:/home/casey/pico-sdk`
+        - (--nimbase, -n) -> similarly, you can provide the path to a locally installed 
+        `nimbase.h` file. Otherwise, the program attempts to download the file from
+        the nim-lang github repository. ex. `-n:/path/to/nimbase.h`
+
+The project is now ready. you can edit the file `src/<project-name>.nim` to your liking. follow 
+the next steps to build the `.uf2` that will be copied over to your pico
 
 ## Building
 
