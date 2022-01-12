@@ -1,91 +1,123 @@
-import commandant
-import std/[strformat, strutils, os, osproc, httpclient, terminal, strscans, streams]
+import std/[strformat, strutils, os, osproc, httpclient, terminal, strscans]
 import picostdlib/private/linkutils
+import commandant
 
-proc printError(msg: string) =
-  echo ansiForegroundColorCode(fgRed), msg, ansiResetCode
-  quit 1 # Should not be using this but short lived program
+type
+  SubCommand = enum
+    Create, Init, Build, Err
+  MsgType = enum
+    Error, Info, Verifying, Success, Building
+
+proc printMessage(subcommand: SubCommand, msgType: MsgType, msg: string) =
+  ## prints a colourful message to the console, `Success` and Error` are handled
+  ## differently. `Error` will also terminate the program.
+  
+  const p1 = "Pico-Nim: "
+  if msgType == Success:
+    echo ansiForegroundColorCode(fgBlue), ansiStyleCode(styleBright), p1, 
+      ansiForegroundColorCode(fgCyan), $subcommand, ": ", 
+      ansiForegroundColorCode(fgGreen), $msgType, ": ",
+      ansiForegroundColorCode(fgWhite), msg, ansiResetCode
+  elif msgType == Error:
+    echo ansiForegroundColorCode(fgBlue), ansiStyleCode(styleBright), p1, 
+      ansiForegroundColorCode(fgCyan), $subcommand, ": ", 
+      ansiForegroundColorCode(fgRed), $msgType, ": ",
+      ansiForegroundColorCode(fgWhite), msg, ansiResetCode
+    quit 1
+  else:
+    echo ansiForegroundColorCode(fgBlue), ansiStyleCode(styleBright), p1, 
+      ansiForegroundColorCode(fgCyan), $subcommand, ": ", 
+      ansiForegroundColorCode(fgYellow), $msgType, ": ",
+      ansiForegroundColorCode(fgWhite), msg, ansiResetCode
 
 
 proc addLinkLibs(program: string) =
-  discard tryRemoveFile("csource/CMakeLists.txt.tmp")
-  const
-    inFile = "csource/CMakeLists.txt"
-    outFile = "csource/CMakeLists.txt.tmp"
-  let
-    inBuffer = newFileStream(inFile)
-    outBuffer = newFileStream(outFile, fmWrite)
+  ## add the library links to the `pico_libraries.cmake` file, which will be 
+  ## included in the `CMakeLists.txt file before `make` is run in the `build`
+  ## subcommand.
   
-  var
-    inLinkLib = false
-    isLinkLine = false
-    projName = ""
+  discard tryRemoveFile("csource/pico_libraries.cmake.tmp")
+  const
+    inFile = "csource/pico_libraries.cmake"
+    outFile = "csource/pico_libraries.cmake.tmp"
+    startLn = "target_link_libraries(${CMAKE_PROJECT_NAME} "
 
-  for line in inbuffer.lines:
-    if line.startsWith("target_link_libraries"):
-      discard line.scanf("target_link_libraries($+ ", projName)
-      inLinkLib = true
-      isLinkLine = true
-    else:
-      if inLinkLib: # we're inside the `target_link_library` scope
-        if line.contains(")"): # We're at either a new call or end of `target_link_library`
-          outBuffer.write("target_link_libraries(")
-          outBuffer.write(projName)
-          outBuffer.write "\n"
-          outBuffer.write(readFile("src" / LibFileName))
-          outBuffer.writeLine(")")
-          if not isLinkLine and line != ")":
-            # Only write line if not `)` and not on same line as target link
-            outbuffer.writeLine(line)
-          inLinkLib = false
-      else:
-        outBuffer.writeLine(line)
-    isLinkLine = false
-
-
-  inBuffer.close()
-  outBuffer.close()
-
+  var f = open(outFile, fmWrite)
+  for line in ("src" / LibFileName).lines:
+    f.writeLine startLn & line & ")"
+  
   moveFile(outFile, inFile)
+  discard tryRemoveFile("csource/pico_libraries.cmake.tmp")
   discard tryRemoveFile("src" / LibFileName)
 
 
 proc createProject(projectPath: string, overwrite: bool) =
+  ## Creates a nim pico project by copying the picostdlib template folder.
+
+  const startMsg = "Create raspberry pi pico projects using Nim!"
+  printMessage(Create, Info, startMsg)
 
   # check if name is valid filename
+  printMessage(Create, Verifying, "Project Name")
   if not projectPath.isValidFilename():
-    printError(fmt"provided --name argument will not work as filename: {projectPath}")
+    printMessage(Create, Error, fmt"provided --name argument will not work as filename: {projectPath}")
 
   # check if the name already has a directory with the same name
   if dirExists(joinPath(getCurrentDir(), projectPath)) and overwrite == false:
-    printError(fmt"provided project name ({projectPath}) already has directory, use --overwrite if you wish to replace contents")
+    printMessage(Create, Error, fmt"provided project name ({projectPath}) already has directory, use --overwrite if you wish to replace contents")
 
   # copy the template over to the current directory
+  printMessage(Create, Info, "Copying template from `picostdlib`.")
   let
     sourcePath = joinPath(getAppDir(), "template")
     name = projectPath.splitPath.tail
   discard existsOrCreateDir(projectPath)
-  copyDir(sourcePath, projectPath)
+  try: copyDir(sourcePath, projectPath)
+  except OSError: printMessage(Create, Error, "Could not copy template folder.")
+  
   # rename nim file
-  moveFile(projectPath / "src/blink.nim", projectPath / fmt"src/{name}.nim")
-  moveFile(projectPath / "template.nimble", projectPath /
-      fmt"{name}.nimble")
+  printMessage(Create, Info, "Renaming files to project name.")
+  try:
+    moveFile(projectPath / "src/blink.nim", projectPath / fmt"src/{name}.nim")
+    moveFile(projectPath / "template.nimble", projectPath /
+        fmt"{name}.nimble")
+  except OSError:
+    printMessage(Create, Error, "Could not rename `.nim` files.")
 
   # change all instances of template `blink` to the project name
+  printMessage(Create, Info, "Rewriting `csource/CMakeLists.txt`.")
   let cmakelists = (projectPath / "/csource/CMakeLists.txt")
-  cmakelists.writeFile cmakelists.readFile.replace("blink", name)   
+  try:
+    cmakelists.writeFile cmakelists.readFile.replace("blink", name) 
+  except IOError: 
+    printMessage(Create, Error, "Could not rewrite `csource/CMakeLists.txt`.")
 
+  printMessage(Create, Success, " Project successfully created!")
+ 
 
 proc initProject(sdk: string = "", nimbase: string = "") =
-
+  ## Initialize the projects dependencies:
+  ## 
+  ## - sdk, if option is not provided a value, the sdk will be downloaded into
+  ##   the project folder
+  ## - nimbase, by default, tries to download the version of nimbase that 
+  ##   matches the users nim version
+  ## 
+  ## If you have moved your pico-sdk folder or updated/changed your nim compiler
+  ## version, then you should rerun `piconim init`.
+  
   proc getActiveNimVersion: string =
+    ## Get the active nim version from the terminal.
+    
     let res = execProcess("nim -v")
     if not res.scanf("Nim Compiler Version $+[", result):
       result = NimVersion
     result.removeSuffix(' ')
 
   proc downloadNimbase(path: string): bool =
-    ## Attempts to download the nimbase if it fails returns false
+    ## Attempts to download the nimbase file from the Nim-Lang github repo
+    ## and if it fails returns false.
+
     let
       nimVer = getActiveNimVersion()
       downloadPath = fmt"https://raw.githubusercontent.com/nim-lang/Nim/v{nimVer}/lib/nimbase.h"
@@ -95,37 +127,43 @@ proc initProject(sdk: string = "", nimbase: string = "") =
       result = true
     except: echo getCurrentExceptionMsg()
 
+  const startMsg = "Initializing project sdk and nimbase path"
+  printMessage(Init, Info, startMsg)
 
   let projectPath = getCurrentDir()
   
   if sdk != "":
+    printMessage(Init, Verifying, "Provided --sdk option.")
     # check if the sdk option path exists and has the appropriate cmake file (very basic check...)
     if not sdk.dirExists():
-      printError(fmt"could not find an existing directory with the provided --sdk argument : {sdk}")
+      printMessage(Init, Error, fmt"could not find an existing directory with the provided --sdk argument : {sdk}")
 
     if not fileExists(fmt"{sdk}/pico_sdk_init.cmake"):
-      printError(fmt"directory provided with --sdk argument does not appear to be a valid pico-sdk library: {sdk}")
+      printMessage(Init, Error, fmt"directory provided with --sdk argument does not appear to be a valid pico-sdk library: {sdk}")
 
   if nimbase != "":
+    printMessage(Init, Verifying, "Provided --nimbase option.")
     if not nimbase.fileExists():
-      printError(fmt"could not find an existing `nimbase.h` file using provided --nimbase argument : {nimbase}")
+      printMessage(Init, Error, fmt"could not find an existing `nimbase.h` file using provided --nimbase argument : {nimbase}")
 
     let (_, name, ext) = nimbase.splitFile()
     if name != "nimbase" or ext != ".h":
-      printError(fmt"invalid filename or extension (expecting `nimbase.h`, recieved `{name}{ext}`")
+      printMessage(Init, Error, fmt"invalid filename or extension (expecting `nimbase.h`, recieved `{name}{ext}`")
 
   # get nimbase.h file from github
   if nimbase == "":
+    let nimVer = getActiveNimVersion()
+    printMessage(Init, Verifying, fmt"Nimbase dependency on https://raw.githubusercontent.com/nim-lang/Nim/v{nimVer}/lib/nimbase.h")
     let nimbaseError = downloadNimbase(projectPath / "csource/nimbase.h")
     if not nimbaseError:
-      printError(fmt"failed to download `nimbase.h` from nim-lang repository, use --nimbase:<path> to specify a local file")
+      printMessage(Init, Error, fmt"failed to download `nimbase.h` from nim-lang repository, use --nimbase:<path> to specify a local file")
   else:
     try:
       copyFile(nimbase, (projectPath / "csource/nimbase.h"))
     except OSError:
-      printError"failed to copy provided nimbase.h file"
+      printMessage(Init, Error, "failed to copy provided nimbase.h file")
 
-
+  printMessage(Init, Info, "Running `cmake`")
   var cmakeArgs: seq[string]
   if sdk != "":
     cmakeArgs.add fmt"-DPICO_SDK_PATH={sdk}"
@@ -144,44 +182,69 @@ proc initProject(sdk: string = "", nimbase: string = "") =
   )
   let cmakeExit = cmakeProc.waitForExit()
   if cmakeExit != 0:
-    printError(fmt"cmake exited with error code: {cmakeExit}")
+    printMessage(Init, Error, fmt"cmake exited with error code: {cmakeExit}")
+  
+  printMessage(Init, Success, " Project successfully initialized!")
 
 
 proc buildProject(program: string, output = "") =
+  ## Build the `.uf2` file via the main program specified as an argument
 
-  #validate build inputs 
+  # TODO - support other output folders
+
+  printMessage(Build, Info, "Building `.uf2` file using `make`.")
+  
+  # validate build inputs 
+  printMessage(Build, Verifying, "Provided program argument")
   if not program.endsWith(".nim"):
-    printError(fmt"provided main program argument is not a nim file: {program}")
+    printMessage(Build, Error, fmt"Provided main program argument is not a nim file: {program}")
   if not fileExists(fmt"src/{program}"):
-    printError(fmt"provided main program argument does not exist: {program}")
+    printMessage(Build, Error, fmt"Provided main program argument does not exist: {program}")
+  
   if output != "":
+    printMessage(Build, Verifying, "Provided program --output option")
     if not dirExists(output):
-      printError(fmt"provided output option is not a valid directory: {output}")
+      printMessage(Build, Error, fmt"Provided output option is not a valid directory: {output}")
 
-  let nimcache = "csource" / "build" / "nimcache"
   # remove previous builds
-  for kind, file in walkDir(nimcache):
-    if kind == pcFile and file.endsWith(".c"):
-      removeFile(file)
+  let nimcache = "csource" / "build" / "nimcache"
+  try:
+    for kind, file in walkDir(nimcache):
+      if kind == pcFile and file.endsWith(".c"):
+        removeFile(file)
+  except OSError:
+    printMessage(Build, Error, "Unable to remove previous builds.")
 
   # compile the nim program to .c file
   let compileError = execCmd(fmt"nim c -c --nimcache:{nimcache} --gc:arc --cpu:arm --os:any -d:release -d:useMalloc ./src/{program}")
   if not compileError == 0:
-    printError(fmt"unable to compile the provided nim program: {program}")
+    printMessage(Build, Error, fmt"Unable to compile the provided nim program: {program}")
 
   # rename the .c file
-  moveFile((nimcache / fmt"@m{program}.c"), (nimcache / fmt"""{program.replace(".nim")}.c"""))
+  try:
+    moveFile((nimcache / fmt"@m{program}.c"), (nimcache / fmt"""{program.replace(".nim")}.c"""))
+  except OSError:
+    printMessage(Build, Error, "Unable to rename nimcache files")
+
+  # add library links to cmake
+  addLinkLibs(program)
 
   # update file timestamps
-  addLinkLibs(program)
   when not defined(windows):
     let touchError = execCmd("touch csource/CMakeLists.txt")
+    if touchError == 1:
+      printMessage(Build, Error, "Unable to update file timestamps")
   when defined(windows):
     let copyError = execCmd("copy /b csource/CMakeLists.txt +,,")
+    if copyError == 1:
+      printMessage(Build, Error, "Unable to update file timestamps")
+  
   # run make
   let makeError = execCmd("make -C csource/build")
+  if makeError != 0:
+    printMessage(Build, Error, fmt"make exited with error code: {makeError}")
 
-
+  printMessage(Build, Success, " Project successfully built!")
 
 # --- MAIN PROGRAM ---
 when isMainModule:
@@ -197,8 +260,6 @@ when isMainModule:
       argument(mainProgram, string)
       option(output, string, "output", "o")
 
-  echo "pico-nim : create raspberry pi pico projects using Nim"
-
   if create:
     createProject(name, overwriteTemplate)
   elif init:
@@ -206,5 +267,5 @@ when isMainModule:
   elif build:
     buildProject(mainProgram, output)
   else:
-    printError("invalid subcommand")
+    printMessage(Err, Error, "invalid subcommand")
 
