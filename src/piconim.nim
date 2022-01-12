@@ -7,9 +7,6 @@ proc printError(msg: string) =
   quit 1 # Should not be using this but short lived program
 
 
-proc helpMessage(): string =
-  result = "some useful message here..."
-
 proc addLinkLibs(program: string) =
   discard tryRemoveFile("csource/CMakeLists.txt.tmp")
   const
@@ -53,7 +50,114 @@ proc addLinkLibs(program: string) =
   discard tryRemoveFile("src" / LibFileName)
 
 
-proc builder(program: string, output = "") =
+proc createProject(projectPath: string, overwrite: bool) =
+
+  # check if name is valid filename
+  if not projectPath.isValidFilename():
+    printError(fmt"provided --name argument will not work as filename: {projectPath}")
+
+  # check if the name already has a directory with the same name
+  if dirExists(joinPath(getCurrentDir(), projectPath)) and overwrite == false:
+    printError(fmt"provided project name ({projectPath}) already has directory, use --overwrite if you wish to replace contents")
+
+  # copy the template over to the current directory
+  let
+    sourcePath = joinPath(getAppDir(), "template")
+    name = projectPath.splitPath.tail
+  discard existsOrCreateDir(projectPath)
+  copyDir(sourcePath, projectPath)
+  # rename nim file
+  moveFile(projectPath / "src/blink.nim", projectPath / fmt"src/{name}.nim")
+  moveFile(projectPath / "template.nimble", projectPath /
+      fmt"{name}.nimble")
+
+  # change all instances of template `blink` to the project name
+  let cmakelists = (projectPath / "/csource/CMakeLists.txt")
+  cmakelists.writeFile cmakelists.readFile.replace("blink", name)   
+
+
+proc initProject(sdk: string = "", nimbase: string = "") =
+
+  proc getActiveNimVersion: string =
+    let res = execProcess("nim -v")
+    if not res.scanf("Nim Compiler Version $+[", result):
+      result = NimVersion
+    result.removeSuffix(' ')
+
+  proc downloadNimbase(path: string): bool =
+    ## Attempts to download the nimbase if it fails returns false
+    let
+      nimVer = getActiveNimVersion()
+      downloadPath = fmt"https://raw.githubusercontent.com/nim-lang/Nim/v{nimVer}/lib/nimbase.h"
+    try:
+      let client = newHttpClient()
+      client.downloadFile(downloadPath, path)
+      result = true
+    except: echo getCurrentExceptionMsg()
+
+
+  let projectPath = getCurrentDir()
+  
+  if sdk != "":
+    # check if the sdk option path exists and has the appropriate cmake file (very basic check...)
+    if not sdk.dirExists():
+      printError(fmt"could not find an existing directory with the provided --sdk argument : {sdk}")
+
+    if not fileExists(fmt"{sdk}/pico_sdk_init.cmake"):
+      printError(fmt"directory provided with --sdk argument does not appear to be a valid pico-sdk library: {sdk}")
+
+  if nimbase != "":
+    if not nimbase.fileExists():
+      printError(fmt"could not find an existing `nimbase.h` file using provided --nimbase argument : {nimbase}")
+
+    let (_, name, ext) = nimbase.splitFile()
+    if name != "nimbase" or ext != ".h":
+      printError(fmt"invalid filename or extension (expecting `nimbase.h`, recieved `{name}{ext}`")
+
+  # get nimbase.h file from github
+  if nimbase == "":
+    let nimbaseError = downloadNimbase(projectPath / "csource/nimbase.h")
+    if not nimbaseError:
+      printError(fmt"failed to download `nimbase.h` from nim-lang repository, use --nimbase:<path> to specify a local file")
+  else:
+    try:
+      copyFile(nimbase, (projectPath / "csource/nimbase.h"))
+    except OSError:
+      printError"failed to copy provided nimbase.h file"
+
+
+  var cmakeArgs: seq[string]
+  if sdk != "":
+    cmakeArgs.add fmt"-DPICO_SDK_PATH={sdk}"
+  else:
+    cmakeArgs.add "-DPICO_SDK_FETCH_FROM_GIT=on"
+  cmakeArgs.add ".."
+
+  let buildDir = projectPath / "csource/build"
+  discard existsOrCreateDir(buildDir)
+
+  let cmakeProc = startProcess(
+    "cmake",
+    args=cmakeArgs,
+    workingDir=buildDir,
+    options={poEchoCmd, poUsePath, poParentStreams}
+  )
+  let cmakeExit = cmakeProc.waitForExit()
+  if cmakeExit != 0:
+    printError(fmt"cmake exited with error code: {cmakeExit}")
+
+
+proc buildProject(program: string, output = "") =
+
+  #validate build inputs 
+  if not program.endsWith(".nim"):
+    printError(fmt"provided main program argument is not a nim file: {program}")
+  if not fileExists(fmt"src/{program}"):
+    printError(fmt"provided main program argument does not exist: {program}")
+  if output != "":
+    if not dirExists(output):
+      printError(fmt"provided output option is not a valid directory: {output}")
+
   let nimcache = "csource" / "build" / "nimcache"
   # remove previous builds
   for kind, file in walkDir(nimcache):
@@ -77,131 +181,17 @@ proc builder(program: string, output = "") =
   # run make
   let makeError = execCmd("make -C csource/build")
 
-proc getActiveNimVersion: string =
-  let res = execProcess("nim -v")
-  if not res.scanf("Nim Compiler Version $+[", result):
-    result = NimVersion
-  result.removeSuffix(' ')
 
-
-
-proc validateBuildInputs(program: string, output = "") =
-  if not program.endsWith(".nim"):
-    printError(fmt"provided main program argument is not a nim file: {program}")
-  if not fileExists(fmt"src/{program}"):
-    printError(fmt"provided main program argument does not exist: {program}")
-  if output != "":
-    if not dirExists(output):
-      printError(fmt"provided output option is not a valid directory: {output}")
-
-proc validateSdkPath(sdk: string) =
-  # check if the sdk option path exists and has the appropriate cmake file (very basic check...)
-  if not sdk.dirExists():
-    printError(fmt"could not find an existing directory with the provided --sdk argument : {sdk}")
-
-  if not fileExists(fmt"{sdk}/pico_sdk_init.cmake"):
-    printError(fmt"directory provided with --sdk argument does not appear to be a valid pico-sdk library: {sdk}")
-
-proc doSetup(projectPath: string, sdk: string = "") =
-  if not dirExists(projectPath):
-    printError "Could not find csource directory, run \"setup\" from the root of a project created by piconim"
-  if sdk != "":
-    validateSdkPath sdk
-
-  var cmakeArgs: seq[string]
-  if sdk != "":
-    cmakeArgs.add fmt"-DPICO_SDK_PATH={sdk}"
-  else:
-    cmakeArgs.add "-DPICO_SDK_FETCH_FROM_GIT=on"
-  cmakeArgs.add ".."
-
-  let buildDir = projectPath / "csource/build"
-  discard existsOrCreateDir(buildDir)
-
-  let cmakeProc = startProcess(
-    "cmake",
-    args=cmakeArgs,
-    workingDir=buildDir,
-    options={poEchoCmd, poUsePath, poParentStreams}
-  )
-  let cmakeExit = cmakeProc.waitForExit()
-  if cmakeExit != 0:
-    printError(fmt"cmake exited with error code: {cmakeExit}")
-
-proc downloadNimbase(path: string): bool =
-  ## Attempts to download the nimbase if it fails returns false
-  let
-    nimVer = getActiveNimVersion()
-    downloadPath = fmt"https://raw.githubusercontent.com/nim-lang/Nim/v{nimVer}/lib/nimbase.h"
-  try:
-    let client = newHttpClient()
-    client.downloadFile(downloadPath, path)
-    result = true
-  except: echo getCurrentExceptionMsg()
-
-proc createProject(projectPath: string; sdk = "", nimbase = "", override = false) =
-  # copy the template over to the current directory
-  let
-    sourcePath = joinPath(getAppDir(), "template")
-    name = projectPath.splitPath.tail
-  discard existsOrCreateDir(projectPath)
-  copyDir(sourcePath, projectPath)
-  # rename nim file
-  moveFile(projectPath / "src/blink.nim", projectPath / fmt"src/{name}.nim")
-  moveFile(projectPath / "template.nimble", projectPath /
-      fmt"{name}.nimble")
-
-  # get nimbase.h file from github
-  if nimbase == "":
-    let nimbaseError = downloadNimbase(projectPath / "csource/nimbase.h")
-    if not nimbaseError:
-      printError(fmt"failed to download `nimbase.h` from nim-lang repository, use --nimbase:<path> to specify a local file")
-  else:
-    try:
-      copyFile(nimbase, (projectPath / "csource/nimbase.h"))
-    except OSError:
-      printError"failed to copy provided nimbase.h file"
-
-  # change all instances of template `blink` to the project name
-  let cmakelists = (projectPath / "/csource/CMakeLists.txt")
-  cmakelists.writeFile cmakelists.readFile.replace("blink", name)   
-
-  doSetup(projectPath, sdk=sdk)
-
-proc validateInitInputs(name: string, sdk, nimbase: string = "", overwrite: bool) =
-  ## ensures that provided setup cli parameters will work
-
-  # check if name is valid filename
-  if not name.isValidFilename():
-    printError(fmt"provided --name argument will not work as filename: {name}")
-
-  # check if the name already has a directory with the same name
-  if dirExists(joinPath(getCurrentDir(), name)) and overwrite == false:
-    printError(fmt"provided project name ({name}) already has directory, use --overwrite if you wish to replace contents")
-
-  if sdk != "":
-    validateSdkPath sdk
-
-  if nimbase != "":
-    if not nimbase.fileExists():
-      printError(fmt"could not find an existing `nimbase.h` file using provided --nimbase argument : {nimbase}")
-
-    let (_, name, ext) = nimbase.splitFile()
-    if name != "nimbase" or ext != ".h":
-      printError(fmt"invalid filename or extension (expecting `nimbase.h`, recieved `{name}{ext}`")
 
 # --- MAIN PROGRAM ---
 when isMainModule:
   commandline:
-    subcommand(init, "init", "i"):
+    subcommand(create, "create", "c"):
       argument(name, string)
+      flag(overwriteTemplate, "overwrite", "O")
+    subcommand(init, "init", "i"):
       option(sdk, string, "sdk", "s")
       option(nimbase, string, "nimbase", "n")
-      flag(overwriteTemplate, "overwrite", "O")
-
-  commandline:
-    subcommand(setup, "setup"):
-      option(setup_sdk, string, "sdk", "s")
 
     subcommand(build, "build", "b"):
       argument(mainProgram, string)
@@ -209,14 +199,12 @@ when isMainModule:
 
   echo "pico-nim : create raspberry pi pico projects using Nim"
 
-  if init:
-    validateInitInputs(name, sdk, nimbase, overwriteTemplate)
-    createProject(name, sdk)
+  if create:
+    createProject(name, overwriteTemplate)
+  elif init:
+    initProject(sdk, nimbase)
   elif build:
-    validateBuildInputs(mainProgram, output)
-    builder(mainProgram, output)
-  elif setup:
-    doSetup(".", setup_sdk)
+    buildProject(mainProgram, output)
   else:
-    echo helpMessage()
+    printError("invalid subcommand")
 
