@@ -274,12 +274,14 @@ proc buildProject(program: string, output = "") =
   # update file timestamps
   printMessage(Build, Info, "Updating file timestamps.")
   when not defined(windows):
-    let touchError = execCmd("touch csource/CMakeLists.txt")
-    if touchError == 1:
+    let touchError1 = execCmd("touch csource/CMakeLists.txt")
+    let touchError2 = execCmd("touch csource/pico_libraries.txt")
+    if touchError1 == 1 or touchError2 == 1:
       printMessage(Build, Error, "Unable to update file timestamps")
   when defined(windows):
     let copyError = execCmd("copy /b csource/CMakeLists.txt +,,")
-    if copyError == 1:
+    let copyError = execCmd("copy /b csource/pico_libraries.txt +,,")
+    if copyError1 == 1 or copyError2 == 1:
       printMessage(Build, Error, "Unable to update file timestamps")
   
   # run make
@@ -289,7 +291,7 @@ proc buildProject(program: string, output = "") =
     printMessage(Build, Error, fmt"make exited with error code: {makeError}")
 
   printMessage(Build, Success, "Project successfully built!")
-  printMessage(Build, Info, fmt"""csource/build/{program.replace(".nim")}.uf2 can be copied to pico.""")
+  printMessage(Build, Info, fmt"""csource/build/{program.replace(".nim")}.uf2 can be copied to your pico.""")
 
 # --- MAIN PROGRAM ---
 when isMainModule:
