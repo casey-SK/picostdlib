@@ -8,6 +8,7 @@ type
   MsgType = enum
     Error, Info, Verifying, Success, Building
 
+
 proc printMessage(subcommand: SubCommand, msgType: MsgType, msg: string) =
   ## prints a colourful message to the console, `Success` and Error` are handled
   ## differently. `Error` will also terminate the program.
@@ -29,26 +30,6 @@ proc printMessage(subcommand: SubCommand, msgType: MsgType, msg: string) =
       ansiForegroundColorCode(fgCyan), $subcommand, ": ", 
       ansiForegroundColorCode(fgYellow), $msgType, ": ",
       ansiForegroundColorCode(fgWhite), msg, ansiResetCode
-
-
-proc addLinkLibs(program: string) =
-  ## add the library links to the `pico_libraries.cmake` file, which will be 
-  ## included in the `CMakeLists.txt file before `make` is run in the `build`
-  ## subcommand.
-  
-  discard tryRemoveFile("csource/pico_libraries.cmake.tmp")
-  const
-    inFile = "csource/pico_libraries.cmake"
-    outFile = "csource/pico_libraries.cmake.tmp"
-    startLn = "target_link_libraries(${CMAKE_PROJECT_NAME} "
-
-  var f = open(outFile, fmWrite)
-  for line in ("src" / LibFileName).lines:
-    f.writeLine startLn & line & ")"
-  
-  moveFile(outFile, inFile)
-  discard tryRemoveFile("csource/pico_libraries.cmake.tmp")
-  discard tryRemoveFile("src" / LibFileName)
 
 
 proc createProject(projectPath: string, overwrite: bool) =
@@ -189,8 +170,67 @@ proc initProject(sdk: string = "", nimbase: string = "") =
 
 proc buildProject(program: string, output = "") =
   ## Build the `.uf2` file via the main program specified as an argument
-
   # TODO - support other output folders
+
+  type
+    LinkableLib = enum
+      stdio = "pico_stdlib"
+      multicore = "pico_multicore"
+      adc = "hardware_adc"
+      pio = "hardware_pio"
+      dma = "hardware_dma"
+      i2c = "hardware_i2c"
+      rtc = "hardware_rtc"
+      uart = "hardware_uart"
+      spi = "hardware_spi"
+      clock = "hardware_clocks"
+      reset = "hardware_resets"
+      flash = "hardware_flash"
+      pwm = "hardware_pwm"
+      interp = "hardware_interp"
+
+  proc getLinkedLib(fileName: string): set[LinkableLib] =
+    ## Iterates over lines searching for includes adding to result
+    
+    let file = open(fileName)
+    for line in file.lines:
+      echo line
+      if not line.startsWith("typedef"):
+        var incld = ""
+        if line.scanf("""#include "$+.""", incld) or line.scanf("""#include <$+.""", incld):
+          let incld = incld.replace('/', '_')
+          try:
+            result.incl parseEnum[LinkableLib](incld)
+          except: discard
+      else:
+        break
+    close file
+
+
+  proc addLinkLibs(program: string) =
+    ## add the library links to the `pico_libraries.cmake` file, which will be 
+    ## included in the `CMakeLists.txt file before `make` is run in the `build`
+    ## subcommand.
+
+    discard tryRemoveFile("csource/pico_libraries.cmake.tmp")
+    const
+      inFile = "csource/pico_libraries.cmake"
+      outFile = "csource/pico_libraries.cmake.tmp"
+      startLn = "target_link_libraries(${CMAKE_PROJECT_NAME} "
+
+    var libs: set[LinkableLib]
+    for kind, path in walkDir("csource/build/nimcache"):
+      if kind == pcFile and path.endsWith(".c"):
+        libs.incl getLinkedLib(path)
+
+
+    var f = open(outFile, fmWrite)
+    for lib in libs:
+      f.writeLine startLn & $lib & ")"
+    
+    moveFile(outFile, inFile)
+    discard tryRemoveFile("csource/pico_libraries.cmake.tmp")
+    discard tryRemoveFile("src" / LibFileName)
 
   printMessage(Build, Info, "Building `.uf2` file using `make`.")
   
