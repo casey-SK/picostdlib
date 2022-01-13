@@ -210,10 +210,10 @@ proc buildProject(program: string, output = "") =
     ## included in the `CMakeLists.txt file before `make` is run in the `build`
     ## subcommand.
 
-    discard tryRemoveFile("csource/pico_libraries.txt.tmp")
+    discard tryRemoveFile("csource/pico_nim_import.cmake.tmp")
     const
-      inFile = "csource/pico_libraries.txt"
-      outFile = "csource/pico_libraries.txt.tmp"
+      inFile = "csource/pico_nim_import.cmake"
+      outFile = "csource/pico_nim_import.cmake.tmp"
       startLn = "target_link_libraries(${CMAKE_PROJECT_NAME} "
 
     var libs: set[LinkableLib]
@@ -227,7 +227,7 @@ proc buildProject(program: string, output = "") =
       f.writeLine(startLn & $lib & ")")
     
     moveFile(outFile, inFile)
-    discard tryRemoveFile("csource/pico_libraries.txt.tmp")
+    discard tryRemoveFile("csource/pico_nim_import.cmake.tmp")
 
 
   printMessage(Build, Info, "Building `.uf2` file using `make`.")
@@ -275,12 +275,12 @@ proc buildProject(program: string, output = "") =
   printMessage(Build, Info, "Updating file timestamps.")
   when not defined(windows):
     let touchError1 = execCmd("touch csource/CMakeLists.txt")
-    let touchError2 = execCmd("touch csource/pico_libraries.txt")
+    let touchError2 = execCmd("touch csource/pico_nim_import.cmake")
     if touchError1 == 1 or touchError2 == 1:
       printMessage(Build, Error, "Unable to update file timestamps")
   when defined(windows):
     let copyError = execCmd("copy /b csource/CMakeLists.txt +,,")
-    let copyError = execCmd("copy /b csource/pico_libraries.txt +,,")
+    let copyError = execCmd("copy /b csource/pico_nim_import.cmake +,,")
     if copyError1 == 1 or copyError2 == 1:
       printMessage(Build, Error, "Unable to update file timestamps")
   
