@@ -1,8 +1,5 @@
 import gpio
 
-import private/linkutils
-linkLibrary("hardware_adc")
-
 type AdcInput* {.pure, size: sizeof(cuint).} = enum
   ## Aliases for selectInput() procedure 
   ## ADC input. 0...3 are GPIOs 26...29 respectively. Input 4 is the onboard temperature sensor.

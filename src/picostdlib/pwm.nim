@@ -1,8 +1,6 @@
 import gpio
 export gpio
 
-import private/linkutils
-linkLibrary("hardware_pwm")
 
 {.push header: "hardware/pwm.h".}
 type

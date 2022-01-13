@@ -1,5 +1,3 @@
-import private/linkutils
-linkLibrary("pico_stdlib")
 
 type
   GpioFunction* {.size: sizeof(uint32).} = enum

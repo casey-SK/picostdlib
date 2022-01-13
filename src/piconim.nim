@@ -1,5 +1,4 @@
 import std/[strformat, strutils, os, osproc, httpclient, terminal, strscans]
-import picostdlib/private/linkutils
 import commandant
 
 type
@@ -170,7 +169,7 @@ proc initProject(sdk: string = "", nimbase: string = "") =
 
 proc buildProject(program: string, output = "") =
   ## Build the `.uf2` file via the main program specified as an argument
-  # TODO - support other output folders
+  # TODO - support user-defined output dirs
 
   type
     LinkableLib = enum
@@ -194,7 +193,6 @@ proc buildProject(program: string, output = "") =
     
     let file = open(fileName)
     for line in file.lines:
-      echo line
       if not line.startsWith("typedef"):
         var incld = ""
         if line.scanf("""#include "$+.""", incld) or line.scanf("""#include <$+.""", incld):
@@ -212,10 +210,10 @@ proc buildProject(program: string, output = "") =
     ## included in the `CMakeLists.txt file before `make` is run in the `build`
     ## subcommand.
 
-    discard tryRemoveFile("csource/pico_libraries.cmake.tmp")
+    discard tryRemoveFile("csource/pico_libraries.txt.tmp")
     const
-      inFile = "csource/pico_libraries.cmake"
-      outFile = "csource/pico_libraries.cmake.tmp"
+      inFile = "csource/pico_libraries.txt"
+      outFile = "csource/pico_libraries.txt.tmp"
       startLn = "target_link_libraries(${CMAKE_PROJECT_NAME} "
 
     var libs: set[LinkableLib]
@@ -226,11 +224,11 @@ proc buildProject(program: string, output = "") =
 
     var f = open(outFile, fmWrite)
     for lib in libs:
-      f.writeLine startLn & $lib & ")"
+      f.writeLine(startLn & $lib & ")")
     
     moveFile(outFile, inFile)
-    discard tryRemoveFile("csource/pico_libraries.cmake.tmp")
-    discard tryRemoveFile("src" / LibFileName)
+    discard tryRemoveFile("csource/pico_libraries.txt.tmp")
+
 
   printMessage(Build, Info, "Building `.uf2` file using `make`.")
   
@@ -247,6 +245,7 @@ proc buildProject(program: string, output = "") =
       printMessage(Build, Error, fmt"Provided output option is not a valid directory: {output}")
 
   # remove previous builds
+  printMessage(Build, Info, "Removing previous builds.")
   let nimcache = "csource" / "build" / "nimcache"
   try:
     for kind, file in walkDir(nimcache):
@@ -256,20 +255,24 @@ proc buildProject(program: string, output = "") =
     printMessage(Build, Error, "Unable to remove previous builds.")
 
   # compile the nim program to .c file
+  printMessage(Build, Info, "Compiling Nim files to `c` files, placing in nimcache.")
   let compileError = execCmd(fmt"nim c -c --nimcache:{nimcache} --gc:arc --cpu:arm --os:any -d:release -d:useMalloc ./src/{program}")
   if not compileError == 0:
     printMessage(Build, Error, fmt"Unable to compile the provided nim program: {program}")
 
   # rename the .c file
+  printMessage(Build, Info, "Renaming nimcache files.")
   try:
     moveFile((nimcache / fmt"@m{program}.c"), (nimcache / fmt"""{program.replace(".nim")}.c"""))
   except OSError:
-    printMessage(Build, Error, "Unable to rename nimcache files")
+    printMessage(Build, Error, "Unable to rename nimcache files.")
 
   # add library links to cmake
+  printMessage(Build, Info, "Checking pico-sdk imports, adding library links.")
   addLinkLibs(program)
 
   # update file timestamps
+  printMessage(Build, Info, "Updating file timestamps.")
   when not defined(windows):
     let touchError = execCmd("touch csource/CMakeLists.txt")
     if touchError == 1:
@@ -280,11 +283,13 @@ proc buildProject(program: string, output = "") =
       printMessage(Build, Error, "Unable to update file timestamps")
   
   # run make
+  printMessage(Build, Info, "Building via `make`")
   let makeError = execCmd("make -C csource/build")
   if makeError != 0:
     printMessage(Build, Error, fmt"make exited with error code: {makeError}")
 
-  printMessage(Build, Success, " Project successfully built!")
+  printMessage(Build, Success, "Project successfully built!")
+  printMessage(Build, Info, fmt"""csource/build/{program.replace(".nim")}.uf2 can be copied to pico.""")
 
 # --- MAIN PROGRAM ---
 when isMainModule:
